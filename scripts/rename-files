@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+# Function to display help menu
+show_help() {
+    echo "Usage: rename-files [OPTIONS]"
+    echo "Rename files in the current directory by replacing a substring."
+    echo ""
+    echo "Options:"
+    echo "  -b, --before STRING   The substring to be replaced in the filenames."
+    echo "  -a, --after STRING    The substring to replace the 'before' substring with."
+    echo "  -dr, --dry-run        Show the changes that would be made without actually renaming files."
+    echo "  -r, --recursive       Rename files recursively (default is non-recursive)."
+    echo "  -h, --help            Display this help menu."
+    echo ""
+    echo "Example:"
+    echo "  rename-files -b \"bob noel\" -a \"billy joel-mathews\" -dr"
+    echo "  rename-files -b \"bob noel\" -a \"billy joel-mathews\" -r"
+    exit 0
+}
+
+# Default values
+DRY_RUN=false
+RECURSIVE=false
+
+# Parse command-line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -b|--before) BEFORE="$2"; shift ;;
+        -a|--after) AFTER="$2"; shift ;;
+        -dr|--dry-run) DRY_RUN=true ;;
+        -r|--recursive) RECURSIVE=true ;;
+        -h|--help) show_help ;;
+        *) echo "Unknown parameter passed: $1"; show_help ;;
+    esac
+    shift
+done
+
+# Check if required arguments are provided
+if [[ -z "$BEFORE" || -z "$AFTER" ]]; then
+    echo "Error: --before and --after arguments are required."
+    show_help
+fi
+
+# Determine the depth option for fd
+DEPTH_OPTION=""
+if ! $RECURSIVE; then
+    DEPTH_OPTION="--max-depth 1"
+fi
+
+# Use fd to find files and rename them
+fd . $DEPTH_OPTION | while read -r FILE; do
+    if [[ "$FILE" == *"$BEFORE"* ]]; then
+        NEW_NAME="${FILE//$BEFORE/$AFTER}"
+        if $DRY_RUN; then
+            echo "Would rename: $FILE -> $NEW_NAME"
+        else
+            mv "$FILE" "$NEW_NAME"
+            echo "Renamed: $FILE -> $NEW_NAME"
+        fi
+    else
+        echo "Skipping: $FILE (substring '$BEFORE' not found)"
+    fi
+done
+
+echo "Done."

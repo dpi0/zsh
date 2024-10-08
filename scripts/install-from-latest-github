@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+
+# Default values
+REPO_OWNER=""
+REPO_NAME=""
+ARCHIVE_NAME=""
+DESTINATION_DIR="$PWD"  # Default to current directory
+INSTALL=false
+
+# Function to display help menu
+display_help() {
+    echo "usage: install-from-latest-github -o <owner> -r <repo> -a <archive_name> [-d <destination_dir>] [-i]"
+    echo ""
+    echo "Download and optionally install the latest release from a GitHub repository."
+    echo ""
+    echo "options:"
+    echo "  -o, --owner <owner>          github repository owner."
+    echo "  -r, --repo <repo>            github repository name."
+    echo "  -a, --archive <archive_name> name of the archive to download."
+    echo "  -d, --destination <destination_dir> directory to save and decompress the archive. (default: current directory)"
+    echo "  -i, --install                install the binary to ~/applications after extraction."
+    echo "  -h, --help                   display this help menu."
+    echo ""
+    echo "examples:"
+    echo "  install-from-latest-github -o tellerops -r teller -a teller-x86_64-linux.tar.xz -d ~/test"
+    echo "  install-from-latest-github -o tellerops -r teller -a teller-x86_64-linux.tar.xz -i"
+    exit 0
+}
+
+# Parse command line arguments
+parse_arguments() {
+    while [[ "$#" -gt 0 ]]; do
+        case $1 in
+            -o|--owner) REPO_OWNER="$2"; shift ;;
+            -r|--repo) REPO_NAME="$2"; shift ;;
+            -a|--archive) ARCHIVE_NAME="$2"; shift ;;
+            -d|--destination) DESTINATION_DIR="$2"; shift ;;
+            -i|--install) INSTALL=true ;;
+            -h|--help) display_help ;;
+            *) echo "Unknown parameter passed: $1"; display_help ;;
+        esac
+        shift
+    done
+}
+
+# Check if all required parameters are provided
+check_required_parameters() {
+    if [[ -z "$REPO_OWNER" || -z "$REPO_NAME" || -z "$ARCHIVE_NAME" ]]; then
+        echo "Error: Missing required parameters."
+        display_help
+    fi
+}
+
+# Ensure the destination directory exists
+create_destination_directory() {
+    mkdir -p "$DESTINATION_DIR" || { echo "Error: Failed to create destination directory."; exit 1; }
+}
+
+# Get the latest release version
+get_latest_release_version() {
+    latest_version=$(wget -qO- "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" | jq -r '.tag_name')
+    if [[ -z "$latest_version" ]]; then
+        echo "Error: Failed to retrieve the latest release version."
+        exit 1
+    fi
+}
+
+# Download the archive
+download_archive() {
+    echo "Downloading $ARCHIVE_NAME from $REPO_OWNER/$REPO_NAME release $latest_version..."
+    wget -q -O "$DESTINATION_DIR/$ARCHIVE_NAME" "https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$latest_version/$ARCHIVE_NAME" || { echo "Error: Failed to download the archive."; exit 1; }
+}
+
+# Decompress the archive using ouch
+decompress_archive() {
+    echo "Decompressing $ARCHIVE_NAME to $DESTINATION_DIR..."
+    ouch decompress "$DESTINATION_DIR/$ARCHIVE_NAME" -d "$DESTINATION_DIR" || { echo "Error: Failed to decompress the archive."; exit 1; }
+}
+
+# Install the binary to ~/Applications
+install_binary() {
+    if $INSTALL; then
+        echo "Installing binary to ~/Applications..."
+        mkdir -p "$HOME/Applications" || { echo "Error: Failed to create ~/Applications directory."; exit 1; }
+        binary_path=$(fd "$REPO_NAME" "$DESTINATION_DIR" --type f --hidden --follow --maxdepth 3)
+        if [[ -z "$binary_path" ]]; then
+            echo "Error: Binary not found in the extracted directory."
+            exit 1
+        fi
+        cp "$binary_path" "$HOME/Applications/" || { echo "Error: Failed to copy binary to ~/Applications."; exit 1; }
+        echo "Successfully installed $REPO_NAME to ~/Applications."
+    fi
+}
+
+# Main function to orchestrate the script
+main() {
+    parse_arguments "$@"
+    check_required_parameters
+    create_destination_directory
+    get_latest_release_version
+    download_archive
+    decompress_archive
+    install_binary
+    echo "Successfully downloaded and decompressed $ARCHIVE_NAME to $DESTINATION_DIR."
+}
+
+# Execute the main function
+main "$@"

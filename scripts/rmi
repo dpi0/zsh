@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+# rmi: A safer file deletion script
+
+# Define constants
+TRASH_DIR="$HOME/.Trash"
+LOG_FILE="$HOME/.rmi.log"
+
+# ANSI escape codes for colors
+BG_GREEN="\e[48;5;46m"
+BG_BLUE="\e[48;5;27m"
+BG_YELLOW="\e[48;5;220m"
+BG_DARKPURPLE="\e[48;5;95m"
+BG_CYAN="\e[48;5;51m"
+BG_ORANGE="\e[48;5;208m"
+BG_RED="\e[48;5;1m"
+
+FG_BLACK="\e[38;5;0m"
+FG_WHITE="\e[38;5;15m"
+FG_DARKWHITE="\e[38;5;252m"
+FG_RED="\e[38;5;160m"
+FG_GREEN="\e[38;5;46m"
+FG_BLUE="\e[38;5;27m"
+FG_YELLOW="\e[38;5;226m"
+FG_PURPLE="\e[38;5;93m"
+FG_ORANGE="\e[38;5;208m"
+FG_LIGHTGREEN="\e[38;5;85m"
+
+NC='\033[0m' # No Color
+
+# Ensure trash directory exists
+mkdir -p "$TRASH_DIR" || { echo "Failed to create trash directory" >&2; exit 1; }
+
+# Check if --help or -h flag is present
+if [[ "$1" == "--help" || "$1" == "-h" || $# -eq 0 ]]; then
+    echo -e "${FG_WHITE}Usage:${NC} rmi [OPTIONS] [FILES/DIRECTORIES]"
+    echo -e "${FG_WHITE}Options:${NC}"
+    echo -e "  -h, --help        Display this help menu and exit"
+    echo -e "  -f, --force       Force delete without confirmation"
+    echo -e "  -r, --recursive   Delete entire directories without recursing into their contents"
+    echo -e "  -s, --summary     Display a summary of deleted files"
+    echo -e "  log               View the deletion log"
+    echo -e "  ls, l, list       List contents of the trash directory"
+    echo -e "\n${FG_WHITE}Examples:${NC}"
+    echo -e "  rmi file.txt              Delete file.txt"
+    echo -e "  rmi log                   View the deletion log"
+    echo -e "  rmi -f file.txt           Force delete file.txt without confirmation"
+    echo -e "  rmi -r directory          Delete the entire directory without recursing into its contents"
+    echo -e "  rmi -s file.txt           Delete file.txt and display a summary of deleted files"
+    echo -e "  rmi ls                    List contents of the trash directory"
+    exit 0
+fi
+
+# Initialize flags
+FORCE=false
+RECURSIVE=false
+SUMMARY=false
+
+# Process flags
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -f|--force)
+            FORCE=true
+            shift
+            ;;
+        -r|--recursive)
+            RECURSIVE=true
+            shift
+            ;;
+        -s|--summary)
+            SUMMARY=true
+            shift
+            ;;
+        -*)
+            # Handle combined flags like -rf
+            for (( i=1; i<${#1}; i++ )); do
+                case "${1:$i:1}" in
+                    f) FORCE=true ;;
+                    r) RECURSIVE=true ;;
+                    s) SUMMARY=true ;;
+                    *) echo "Unknown flag: -${1:$i:1}" >&2; exit 1 ;;
+                esac
+            done
+            shift
+            ;;
+        log)
+            bat "$LOG_FILE"
+            exit 0
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Check if the user wants to list the trash directory
+if [[ "$1" == "ls" || "$1" == "l" || "$1" == "list" ]]; then
+    echo -e "${FG_WHITE}Contents of the trash directory ($TRASH_DIR):${NC}"
+    eza --icons -a -l "$TRASH_DIR"
+    exit 0
+fi
+
+# Array to store deleted files for summary
+declare -a deleted_files
+
+# Function to move files or directories to trash
+move_to_trash() {
+    local item="$1"
+    local abs_item=$(realpath "$item")
+    local rel_item=$(realpath --relative-to="$PWD" "$item")
+    local timestamp=$(date +%Y-%m-%d\ %H:%M:%S.%3N)
+    local trash_path="$TRASH_DIR/$(basename "$item")"
+    
+    # Determine item type
+    local item_type="FILE"
+    local item_color="${FG_LIGHTGREEN}"
+    if [[ -d "$item" ]]; then
+        item_type="DIR"
+        item_color="${FG_ORANGE}"
+    fi
+    
+    # Ask for confirmation unless --force is used
+    if ! $FORCE; then
+        local item_name=$(basename "$item")
+        local parent_dir=$(dirname "$rel_item")
+        echo -ne "${FG_RED}DELETE${NC} ${parent_dir}/"
+        echo -ne "${item_color}${item_name}${NC}? (y/n): "
+        read confirm
+        if [[ "$confirm" != "y" ]]; then
+            echo -e "${FG_PURPLE}SKIPPED${NC} $rel_item\n"
+            return 0
+        fi
+    else
+        echo -e "${BG_YELLOW}${FG_BLACK}WARNING${NC} Deleting $rel_item without confirmation"
+    fi
+    
+    # Move item to trash and log the action
+    if mv "$item" "$trash_path" &> /dev/null; then
+        local log_entry="[$timestamp] [$item_type]"
+        if $FORCE; then
+            log_entry+=" [FORCE]"
+        fi
+        log_entry+=" $abs_item"
+        echo "$log_entry" >> "$LOG_FILE"
+        echo -e "${BG_RED}${FG_BLACK}DELETED${NC} $rel_item\n"
+        deleted_files+=("$abs_item $(du -sh "$trash_path" | cut -f1)")
+    else
+        echo "Failed to move $item to trash" >&2
+        return 1
+    fi
+}
+
+# Recursive function to traverse directories
+traverse_and_move() {
+    local item="$1"
+    local abs_item=$(realpath "$item")
+    
+    if [[ -d "$item" ]]; then
+        if $RECURSIVE; then
+            # Move the entire directory without recursing into its contents
+            move_to_trash "$item"
+        else
+            # Move all files and subdirectories in the directory
+            for sub_item in "$item"/*; do
+                if [[ -e "$sub_item" ]]; then
+                    traverse_and_move "$sub_item"
+                fi
+            done
+            # Move the directory itself
+            move_to_trash "$item"
+        fi
+    elif [[ -f "$item" ]]; then
+        # Move the file
+        move_to_trash "$item"
+    fi
+}
+
+# Main loop to process each file or directory
+for item in "$@"; do
+    if [[ -e "$item" ]]; then
+        traverse_and_move "$item"
+    else
+        echo "File or directory $item does not exist" >&2
+    fi
+done
+
+# Summary of deleted files
+if $SUMMARY; then
+    if [[ ${#deleted_files[@]} -gt 0 ]]; then
+        echo -e "\n${FG_WHITE}Summary of deleted files:${NC}"
+        echo -e "${FG_WHITE}------------------------------"
+        for entry in "${deleted_files[@]}"; do
+            IFS=' ' read -r path size <<< "$entry"
+            if [[ -d "$path" ]]; then
+                printf "${FG_ORANGE}%-60s | %6s${NC}\n" "$path" "$size"
+            else
+                printf "${FG_WHITE}%-60s | %6s${NC}\n" "$path" "$size"
+            fi
+        done
+        echo -e "${FG_WHITE}------------------------------"
+    fi
+fi

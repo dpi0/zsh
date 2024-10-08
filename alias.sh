@@ -14,12 +14,14 @@ alias image='loupe'
 alias yless="jless --yaml"
 alias copy="wl-copy"
 alias lf="yazi"
-alias paste="paste.sh"
 alias notes="note"
 alias send-to-phone="qrcp"
+alias rm='echo "This is a dangerous command. Use rmi instead."'
+
+#alias rm="rm -iv"
 
 # remove all dir and all it's files
-alias rmd='/bin/rm  --recursive --force --verbose '
+alias rmd='rm -i --recursive --force --verbose '
 
 # list all root dirs with their sizes of the current dir
 alias sizedir='fd -H -t d -d 1 . . | xargs du -hs | sort -h -r'

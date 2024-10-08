@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+# Global variables
+LOG_FILE="$HOME/.send-to-server.log"
+SERVER_USER="dpi0"
+SERVER_IP="10.0.0.1"
+FALLBACK_IP="192.168.1.100"
+SSH_PORT="2059"
+SSH_KEY="$HOME/.ssh/home-server"
+
+# Function to display usage
+usage() {
+    echo "Usage: send-to-server [OPTIONS] SOURCE1 [SOURCE2 ...] DESTINATION"
+    echo ""
+    echo "Send files or directories to a remote server using rsync over SSH."
+    echo ""
+    echo "Arguments:"
+    echo "  SOURCE1 [SOURCE2 ...]   One or more source files or directories to be sent."
+    echo "  DESTINATION             The destination directory on the remote server."
+    echo ""
+    echo "Options:"
+    echo "  -h, --help              Display this help message and exit."
+    echo ""
+    echo "Server Details:"
+    echo "  Primary Server IP:      $SERVER_IP"
+    echo "  Fallback Server IP:     $FALLBACK_IP"
+    echo "  SSH Port:               $SSH_PORT"
+    echo "  SSH Key:                $SSH_KEY"
+    echo ""
+    echo "Example:"
+    echo "  send-to-server /path/to/file1 /path/to/file2 /path/to/dir1 /destination/dir"
+    exit 1
+}
+
+# Function to log messages
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+# Check if at least two arguments are provided (at least one source file and one destination directory)
+if [ "$#" -lt 2 ]; then
+    usage
+fi
+
+# Check for help option
+for arg in "$@"; do
+    if [ "$arg" == "-h" ] || [ "$arg" == "--help" ]; then
+        usage
+    fi
+done
+
+# Extract the last argument as the destination directory
+dest="${@: -1}"
+
+# Extract all arguments except the last one (i.e., the source files/directories)
+sources=("${@:1:$#-1}")
+
+# Check if the primary server is reachable
+if ! ping -c 1 -W 1 "$SERVER_IP" &>/dev/null; then
+    log "Primary server $SERVER_IP is unreachable. Switching to fallback server $FALLBACK_IP."
+    SERVER_IP="$FALLBACK_IP"
+fi
+
+# Rsync the files/directories to the server
+rsync_command=(rsync -r -havz --progress -e "ssh -p $SSH_PORT -i $SSH_KEY")
+rsync_command+=("${sources[@]}" "$SERVER_USER@$SERVER_IP:$dest")
+
+log "Starting rsync operation..."
+if "${rsync_command[@]}"; then
+    log "Rsync operation completed successfully."
+else
+    log "Rsync operation failed."
+    exit 1
+fi
